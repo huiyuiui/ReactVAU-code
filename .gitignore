@@ -1,0 +1,28 @@
+# Python
+__pycache__
+*.pyc
+*.egg-info
+dist
+
+# Log
+*.mp4
+*.log
+*.log.*
+scripts/config/paths.local.sh
+
+# Editor
+.idea
+*.swp
+.vscode
+.ipynb_checkpoints
+
+ckpt
+anno
+tools
+data
+*dataset
+*results
+vad_data
+*sbatch
+ablation
+baseline

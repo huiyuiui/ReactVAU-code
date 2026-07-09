@@ -1,0 +1,8 @@
+datasets:
+  - json_path: scripts/train/finetune-hivau/hivau_minimal.json
+    data_root: /path/to/HIVAU-70k/videos
+    sampling_strategy: all
+    media_type: video
+    video_read_type: decord
+
+pg_scores_path: precomputed/pg_scores_hivau_train.json
