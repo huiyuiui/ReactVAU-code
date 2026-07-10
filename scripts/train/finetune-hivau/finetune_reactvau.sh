@@ -2,7 +2,7 @@
 # ReactVAU HIVAU finetuning on a single RTX 4090.
 # Local non-SLURM version of scripts/sbatch/train_reactvau_hivau_4090.sh.
 
-set -e
+set -eo pipefail
 
 # ==========================================
 # 1. Environment Setup
@@ -51,6 +51,8 @@ LORA_ALPHA="${LORA_ALPHA:-16}"
 
 MM_PROJECTOR_TYPE="${MM_PROJECTOR_TYPE:-tome729_fstw_pemf}"
 PROMPT_VERSION="${PROMPT_VERSION:-qwen_2}"
+NUM_TRAIN_EPOCHS="${NUM_TRAIN_EPOCHS:-1}"
+MAX_STEPS="${MAX_STEPS:--1}"
 MID_RUN_NAME="${MID_RUN_NAME:-hivau_ft_4090_qlora_$(date +"%Y%m%d_%H%M%S")}"
 OUTPUT_DIR="${OUTPUT_DIR:-ckpt/hivau-finetune/${MID_RUN_NAME}}"
 mkdir -p "${OUTPUT_DIR}/runs"
@@ -106,6 +108,7 @@ echo ""
 # ==========================================
 # 4. Run Training
 # ==========================================
+set +e
 CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES} python -u llava/train/train_mem.py \
     --deepspeed scripts/deepspeed/zero1.json \
     --model_name_or_path ${LLM_VERSION} \
@@ -134,7 +137,8 @@ CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES} python -u llava/train/train_mem.py 
     \
     --run_name ${MID_RUN_NAME} \
     --output_dir ${OUTPUT_DIR} \
-    --num_train_epochs 1 \
+    --num_train_epochs "${NUM_TRAIN_EPOCHS}" \
+    --max_steps "${MAX_STEPS}" \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 4 \
     --gradient_accumulation_steps 2 \
@@ -168,6 +172,7 @@ CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES} python -u llava/train/train_mem.py 
     2>&1 | tee "${OUTPUT_DIR}/runs/${MID_RUN_NAME}.log"
 
 EXIT_CODE=$?
+set -e
 echo ""
 echo "=========================================="
 echo "Training finished at $(date)"

@@ -28,6 +28,7 @@ exec 2>&1
 # 2. Path Configuration
 # ==========================================
 PROJECT_ROOT="${REACTVAU_ROOT}"
+export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 
 PALIGEMMA_MODEL_PATH="${PALIGEMMA_MODEL_PATH:-${CKPT_ROOT}/paligemma2-3b-mix-448}"
 PALIGEMMA_LORA_PATH="${PALIGEMMA_LORA_PATH:-${CKPT_ROOT}/paligemma2-3b-vad-lora-384-combined-binary/training_384}"

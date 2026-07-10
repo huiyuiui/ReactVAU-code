@@ -301,6 +301,7 @@ class PaliGemmaDetector:
                 input_ids=inputs["input_ids"],
                 attention_mask=inputs["attention_mask"],
                 pixel_values=inputs["pixel_values"],
+                num_logits_to_keep=1,
             )
             last_logits = outputs.logits[0, -1]
             yes_logit = max(last_logits[self.yes_token_id].float(
@@ -333,13 +334,12 @@ class PaliGemmaDetector:
                 input_ids=inputs["input_ids"],
                 attention_mask=inputs["attention_mask"],
                 pixel_values=inputs["pixel_values"],
+                num_logits_to_keep=1,
             )
             logits = outputs.logits
             batch_scores = []
             for batch_idx in range(len(valid_images)):
-                attention = inputs["attention_mask"][batch_idx]
-                last_pos = attention.sum().item() - 1
-                last_logits = logits[batch_idx, last_pos]
+                last_logits = logits[batch_idx, -1]
                 yes_logit = max(last_logits[self.yes_token_id].float(
                 ), last_logits[self.yes_lower_token_id].float())
                 no_logit = max(last_logits[self.no_token_id].float(
@@ -447,6 +447,7 @@ class PaliGemmaDetector:
                 input_ids=extended_input_ids,
                 attention_mask=extended_attention_mask,
                 pixel_values=inputs["pixel_values"],
+                num_logits_to_keep=1,
             )
             
             # Get logits at the last position (next token after "Event:")
@@ -1182,7 +1183,10 @@ class CombinedAnomalyDetector:
 
                 # Encode the LAST frame for StreamForest memory (cache to avoid re-encoding)
                 last_frame = current_group_frames[-1]
-                frame_features = self.streamforest.encode_frame(last_frame)
+                # Keep the per-query cache on CPU. A long video can otherwise retain
+                # hundreds of MiB of vision features on a 24 GB GPU before reasoning
+                # even starts.
+                frame_features = self.streamforest.encode_frame(last_frame).cpu()
                 cached_sf_features.append(frame_features)
 
                 current_group_frames = []
@@ -1205,6 +1209,7 @@ class CombinedAnomalyDetector:
                 batch_grids, self.paligemma_prompt)
             paligemma_scores.extend(batch_scores)
         pg_infer_total = time.time() - pg_infer_start
+        torch.cuda.empty_cache()
 
         # Phase 3: Incremental StreamForest memory + triggered deep reasoning
         # Build memory incrementally using cached features for proper temporal context
@@ -1240,6 +1245,11 @@ class CombinedAnomalyDetector:
         for query_idx, (pg_score, frame_group, frame_indices) in enumerate(
             zip(paligemma_scores, query_frame_groups, query_frame_indices)
         ):
+            sf_features = cached_sf_features[query_idx].to(
+                self.streamforest.device
+            )
+            cached_sf_features[query_idx] = None
+
             # Always update SFTW memory with the last frame (maintains timeline continuity)
             # When memory enhancement is enabled, use update_with_anomaly_score for APS protection:
             # PG score is used as the anomaly signal for PEMF long-term memory protection
@@ -1247,9 +1257,9 @@ class CombinedAnomalyDetector:
             mem_update_start = time.time()
             if self.enable_memory_enhancement:
                 memory_manager.update_with_anomaly_score(
-                    cached_sf_features[query_idx], anomaly_score=pg_score)
+                    sf_features, anomaly_score=pg_score)
             else:
-                memory_manager.update(cached_sf_features[query_idx])
+                memory_manager.update(sf_features)
             timing["memory_update_times"].append(time.time() - mem_update_start)
             sf_frame_count += 1
 
@@ -1325,6 +1335,12 @@ class CombinedAnomalyDetector:
                 # Get SF anomaly score using configured scoring method
                 # Enhanced: [PEMF][SFTW][RT-Anomaly(4×729)] + text-based anomaly context
                 # Baseline: [PEMF][SFTW][Now]
+                free_bytes, _ = torch.cuda.mem_get_info(self.streamforest.device)
+                if free_bytes < 512 * 1024 * 1024:
+                    # PaliGemma and the vision encoder leave reusable blocks in
+                    # separate allocator bins. Release only unused cached blocks
+                    # before the large LLM activation allocation.
+                    torch.cuda.empty_cache()
                 sf_infer_start = time.time()
                 cot_reasoning = ""
                 if self.sf_prompt_style == "cot":
@@ -1379,7 +1395,7 @@ class CombinedAnomalyDetector:
                 if pool_eligible:
                     pool_update_start = time.time()
                     memory_manager.update_anomaly_pool(
-                        cached_sf_features[query_idx],
+                        sf_features,
                         # fused_score
                         pg_score
                     )
@@ -1415,7 +1431,7 @@ class CombinedAnomalyDetector:
                 if pool_eligible:
                     pool_update_start = time.time()
                     memory_manager.update_anomaly_pool(
-                        cached_sf_features[query_idx],
+                        sf_features,
                         pg_score
                     )
                     timing["anomaly_pool_update_times"].append(time.time() - pool_update_start)
@@ -1427,6 +1443,7 @@ class CombinedAnomalyDetector:
             # Clear cache periodically
             if query_idx % 30 == 0:
                 torch.cuda.empty_cache()
+            del sf_features
 
         # Free cached features
         del cached_sf_features
@@ -1829,6 +1846,11 @@ def main():
             traceback.print_exc()
 
     elapsed_time = time.time() - start_time
+
+    if not video_results:
+        raise RuntimeError(
+            "No videos were processed successfully; see the per-video errors above."
+        )
 
     # Compute metrics
     logging.info("\n" + "=" * 70)

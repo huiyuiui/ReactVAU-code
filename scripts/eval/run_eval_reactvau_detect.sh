@@ -16,7 +16,7 @@ reactvau_activate_conda
 
 # Environment variables
 export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH:-}"
-export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:128"
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-max_split_size_mb:128}"
 export TOKENIZERS_PARALLELISM=false
 export NVIDIA_TF32_OVERRIDE=1
 export BNB_CUDA_VERSION=121
@@ -35,6 +35,7 @@ export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 # 2. Path Configuration
 # ==========================================
 PROJECT_ROOT="${REACTVAU_ROOT}"
+export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 
 # PaliGemma2-3B (Detection Module)
 PALIGEMMA_MODEL_PATH="${PALIGEMMA_MODEL_PATH:-${CKPT_ROOT}/paligemma2-3b-mix-448}"
@@ -102,8 +103,8 @@ FUSION_ALPHA=0.40
 SF_SCORING_METHOD="binary"
 
 # SF memory enhancement (Anomaly Pool + APS) and RT-Anomaly
-SF_ENHANCE_MEMORY=true
-RT_ANOMALY=true
+SF_ENHANCE_MEMORY="${SF_ENHANCE_MEMORY:-true}"
+RT_ANOMALY="${RT_ANOMALY:-true}"
 POOL_THRESHOLD=0.6
 
 # SF prompt style

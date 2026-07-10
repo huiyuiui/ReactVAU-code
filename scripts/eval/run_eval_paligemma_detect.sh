@@ -28,6 +28,7 @@ exec 2>&1
 # 2. Path Configuration
 # ==========================================
 PROJECT_ROOT="${REACTVAU_ROOT}"
+export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 MODEL_PATH="${MODEL_PATH:-${PALIGEMMA_MODEL_PATH}}"
 LORA_PATH="${LORA_PATH:-${PALIGEMMA_LORA_PATH}}"
 
@@ -39,9 +40,9 @@ VISION_FEATURE_LAYER="${VISION_FEATURE_LAYER:--2}"
 VIDEO_DIR="${VIDEO_DIR:-${HIVAU_ROOT}}"
 DATASET="${DATASET:-ucf-crime}"  # Options: ucf-crime, xd-violence
 if [ "$DATASET" = "ucf-crime" ]; then
-    ANNO_PATH="${VIDEO_DIR}/instruction/detection/ucf_crime_detection_test.json"
+    ANNO_PATH="${VIDEO_DIR}/raw_annotations/ucf_database_test_anno.txt"
 else
-    ANNO_PATH="${VIDEO_DIR}/instruction/detection/xd_violence_detection_test.json"
+    ANNO_PATH="${VIDEO_DIR}/raw_annotations/xd_database_test_anno.txt"
 fi
 
 OUTPUT_PATH="${OUTPUT_PATH:-${PROJECT_ROOT}/eval_results/vad}"
@@ -54,7 +55,7 @@ QUERY_INTERVAL="${QUERY_INTERVAL:-4}"
 METHOD="${METHOD:-logits}"  # logits or generate
 
 # PaliGemma-only eval can usually use a larger batch than the combined pipeline.
-BATCH_SIZE="${BATCH_SIZE:-32}"
+BATCH_SIZE="${BATCH_SIZE:-16}"
 PROMPT_STYLE="${PROMPT_STYLE:-detail}"
 ATTN_IMPLEMENTATION="${ATTN_IMPLEMENTATION:-sdpa}"
 

@@ -279,13 +279,12 @@ class PaliGemmaDetector:
                 input_ids=inputs["input_ids"],
                 attention_mask=inputs["attention_mask"],
                 pixel_values=inputs["pixel_values"],
+                num_logits_to_keep=1,
             )
             logits = outputs.logits
             batch_scores = []
             for batch_idx in range(len(valid_images)):
-                attention = inputs["attention_mask"][batch_idx]
-                last_pos = attention.sum().item() - 1
-                last_logits = logits[batch_idx, last_pos]
+                last_logits = logits[batch_idx, -1]
                 yes_logit = max(last_logits[self.yes_token_id].float(),
                                 last_logits[self.yes_lower_token_id].float())
                 no_logit = max(last_logits[self.no_token_id].float(),
@@ -1010,6 +1009,18 @@ def main():
     logging.info(f"PaliGemma prompt: '{pg_prompt}'")
 
     # ---- Initialize Models ----
+    logging.info("\nInitializing StreamForest reasoner...")
+    streamforest = StreamForestReasoner(
+        model_path=args.streamforest_model_path,
+        model_base=args.streamforest_model_base,
+        conv_template=args.streamforest_conv_template,
+        device="cuda:0",
+        time_msg_style=args.streamforest_time_msg,
+    )
+
+    # Load and merge the larger StreamForest LoRA before placing PaliGemma on
+    # the GPU. PEFT otherwise creates a temporary CUDA adapter allocation when
+    # the device is already nearly full on a 24 GB card.
     logging.info("\nInitializing PaliGemma detector...")
     paligemma = PaliGemmaDetector(
         model_path=args.paligemma_model_path,
@@ -1019,15 +1030,6 @@ def main():
         image_size=args.paligemma_image_size,
         streamforest_weights_path=args.paligemma_streamforest_weights,
         vision_feature_layer=args.paligemma_vision_feature_layer,
-    )
-
-    logging.info("\nInitializing StreamForest reasoner...")
-    streamforest = StreamForestReasoner(
-        model_path=args.streamforest_model_path,
-        model_base=args.streamforest_model_base,
-        conv_template=args.streamforest_conv_template,
-        device="cuda:0",
-        time_msg_style=args.streamforest_time_msg,
     )
 
     # Combined pipeline

@@ -408,6 +408,7 @@ class PaliGemmaAnomalyDetector:
                 input_ids=inputs["input_ids"],
                 attention_mask=inputs["attention_mask"],
                 pixel_values=inputs["pixel_values"],
+                num_logits_to_keep=1,
             )
 
             logits = outputs.logits  # [1, seq_len, vocab_size]
@@ -514,6 +515,7 @@ class PaliGemmaAnomalyDetector:
                 input_ids=inputs["input_ids"],
                 attention_mask=inputs["attention_mask"],
                 pixel_values=inputs["pixel_values"],
+                num_logits_to_keep=1,
             )
 
             logits = outputs.logits  # [batch_size, seq_len, vocab_size]
@@ -523,12 +525,7 @@ class PaliGemmaAnomalyDetector:
             batch_texts = []
 
             for batch_idx in range(batch_size):
-                # Get logits at the last valid position for each sample
-                # Due to padding, we need to find the last non-padding position
-                attention = inputs["attention_mask"][batch_idx]
-                last_pos = attention.sum().item() - 1  # Last non-padding position
-
-                last_logits = logits[batch_idx, last_pos]  # [vocab_size]
+                last_logits = logits[batch_idx, -1]  # [vocab_size]
 
                 # Get Yes and No logits (check both uppercase and lowercase)
                 yes_logit = max(
