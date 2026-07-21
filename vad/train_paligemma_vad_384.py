@@ -54,9 +54,7 @@ from torch.utils.data import Dataset
 # Import prompt from centralized location
 from get_prompt import get_grid_prompt
 
-# Prompt style configuration - change this to switch prompt styles
-PROMPT_STYLE = "detail"
-GRID_PROMPT = get_grid_prompt(add_special_tokens=False, style=PROMPT_STYLE)
+GRID_PROMPT = get_grid_prompt(add_special_tokens=False)
 
 # Suppress specific warnings
 warnings.filterwarnings("ignore", message=".*use_cache=True.*")
@@ -1166,7 +1164,6 @@ def train():
         f"StreamForest Vision: {model_args.streamforest_vision_weights_path}")
     logger.info(f"Data: {data_args.data_path}")
     logger.info(f"Output: {run_dir}")
-    logger.info(f"Prompt Style: '{PROMPT_STYLE}'")
     logger.info(f"Prompt: '{GRID_PROMPT}'")
     logger.info(f"Max length: {data_args.max_length}")
     logger.info(f"Image: 384x384, 729 tokens (StreamForest SigLIP)")
@@ -1220,7 +1217,6 @@ def train():
             "event_token_weight": training_args.event_token_weight if data_args.label_format == "text" else None,
         },
         "label_format": data_args.label_format,
-        "prompt_style": PROMPT_STYLE,
         "prompt": GRID_PROMPT,
         "vision_encoder": "StreamForest SigLIP-384 (frozen)",
         "vision_feature_layer": model_args.vision_feature_layer,

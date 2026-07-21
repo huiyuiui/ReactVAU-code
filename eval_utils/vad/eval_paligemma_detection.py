@@ -1,3 +1,11 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+
 """
 PaliGemma Video Anomaly Detection Evaluation Script
 
@@ -878,11 +886,6 @@ def main():
     parser.add_argument("--test-samples", type=int, default=5)
     parser.add_argument("--verbose", action="store_true")
 
-    # Prompt configuration
-    parser.add_argument("--prompt-style", type=str, default="detail",
-                        choices=["detail"],
-                        help="Prompt style used by the current ReactVAU VAD model")
-
     # Model configuration
     parser.add_argument("--attn-implementation", type=str, default="eager",
                         choices=["eager", "sdpa", "flash_attention_2"],
@@ -943,9 +946,7 @@ def main():
             f"StreamForest Weights: {args.streamforest_vision_weights_path}")
         logging.info(f"Vision Feature Layer: {args.vision_feature_layer}")
 
-    # Use training prompt with configurable style, or custom prompt for ablation
-    prompt = get_grid_prompt(add_special_tokens=False, style=args.prompt_style)
-    logging.info(f"Prompt style: {args.prompt_style}")
+    prompt = get_grid_prompt(add_special_tokens=False)
     logging.info(f"Prompt: '{prompt}'")
 
     # Load annotation from official anno.txt

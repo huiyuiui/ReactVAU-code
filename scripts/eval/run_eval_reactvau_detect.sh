@@ -1,4 +1,13 @@
 #!/bin/bash
+
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+
 # ReactVAU Video Anomaly Detection Evaluation Script (Single GPU)
 # Combined PaliGemma + StreamForest Pipeline
 
@@ -77,7 +86,6 @@ QUERY_INTERVAL=4        # 4 frames per query = 1 query per second
 
 # PaliGemma settings
 PALIGEMMA_BATCH_SIZE=1  # Minimum for single 24GB GPU with both models loaded
-PALIGEMMA_PROMPT_STYLE="detail"
 PALIGEMMA_ATTN="sdpa"
 
 # StreamForest settings  
@@ -199,7 +207,6 @@ echo "  Pool Threshold: $POOL_THRESHOLD"
 echo "  Score Fusion: $SCORE_FUSION"
 echo "  SF Scoring Method: $SF_SCORING_METHOD"
 echo "  PaliGemma Batch Size: $PALIGEMMA_BATCH_SIZE"
-echo "  PaliGemma Prompt Style: $PALIGEMMA_PROMPT_STYLE"
 echo "  Online Smoothing: alpha=$ONLINE_SMOOTH_ALPHA, beta=$ONLINE_SMOOTH_BETA"
 echo ""
 echo "Output: $OUTPUT_PATH"
@@ -220,7 +227,6 @@ python ${PROJECT_ROOT}/eval_utils/vad/eval_reactvau_detection.py \
     --paligemma-model-path "$PALIGEMMA_MODEL_PATH" \
     $PG_LORA_FLAG \
     $PG_VISION_FLAGS \
-    --paligemma-prompt-style "$PALIGEMMA_PROMPT_STYLE" \
     --paligemma-attn "$PALIGEMMA_ATTN" \
     --streamforest-model-path "$STREAMFOREST_MODEL_PATH" \
     $SF_BASE_FLAG \

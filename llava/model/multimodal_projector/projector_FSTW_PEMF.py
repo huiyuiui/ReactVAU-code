@@ -1,6 +1,15 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
 
+# --------------------------------------------------------
+# Portions Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 # --------------------------------------------------------
@@ -311,8 +320,8 @@ class ToMe_FSTW_PEMF(nn.Module):
         # Anomaly threshold for Anomaly Pool insertion during training.
         # Frames with PG score >= threshold get added to the Pool.
         # Higher threshold (0.6) ensures Pool only stores high-confidence anomaly frames,
-        # reducing contamination from PG false positives (49.2% of frames >= 0.4 vs
-        # 32.2% >= 0.6). Must match eval pool_threshold for train-eval consistency.
+        # reducing contamination from PG false positives.
+        # Must match eval pool_threshold for train-eval consistency.
         anomaly_pool_threshold = 0.6
 
         has_pg_scores = pg_scores is not None and len(pg_scores) > 0

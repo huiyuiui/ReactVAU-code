@@ -1,3 +1,11 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+
 """
 Generate PaliGemma Training Data for Video Anomaly Detection (V4)
 
@@ -18,7 +26,7 @@ Features:
 - No timestamp overlay (temporal order conveyed via prompt)
 - Video-centric processing: Open each video only once
 - Sequential frame reading with frame buffer to minimize seeks
-- Separate output JSON files for each dataset + combined
+- Separate binary training JSON files for each dataset + combined
 
 Note: The 2x2 grid follows reading order: top-left(1) → top-right(2) → bottom-left(3) → bottom-right(4)
       This temporal order should be specified in the training prompt.
@@ -28,8 +36,6 @@ import json
 import cv2
 import random
 import numpy as np
-import torch
-import torchvision.transforms as T
 from PIL import Image
 from tqdm import tqdm
 import argparse
@@ -70,17 +76,12 @@ UCF_CRIME_CONFIG = SamplingConfig(
 QUERY_INTERVAL = 4  # Number of frames per grid
 GRID_SIZE = (2, 2)
 
-# Grid layout for 384x384 vision encoder with 14x14 ViT patches
-# Each frame cell is 182x182 (= 13 patches × 14px), with a 14px gap (= 1 patch)
-# between cells so no ViT patch ever straddles two frame boundaries.
-#
-#   [frame1: 0:182 , 0:182 ] [frame2: 0:182 , 196:378]
-#   [frame3: 196:378, 0:182 ] [frame4: 196:378, 196:378]
-#
-# Remaining 6px at the far edge (378-383) are zero-padded.
-CELL_SIZE = 182        # 13 * 14 = 182 pixels per frame cell
-TOTAL_SIZE = 384       # 384x384 canvas (standard for SigLIP / PaliGemma)
-GRID_GAP = 14          # 1 ViT patch gap between cells
+# Grid layout shared by Stage 1, VAD evaluation, HIVAU evaluation, and
+# precomputation: 191x191 cells separated by a 2px gray divider.
+CELL_SIZE = 191
+TOTAL_SIZE = 384
+GRID_GAP = 2
+GRID_SEPARATOR_COLOR = (128, 128, 128)
 
 # Pre-computed cell slice positions (row_slice, col_slice) for each of 4 frames
 CELL_POSITIONS = [
@@ -90,15 +91,6 @@ CELL_POSITIONS = [
     (slice(CELL_SIZE + GRID_GAP, 2 * CELL_SIZE + GRID_GAP),
      slice(CELL_SIZE + GRID_GAP, 2 * CELL_SIZE + GRID_GAP)),                        # bottom-right
 ]
-
-# SigLIP-style per-frame transform and normalization
-_FRAME_TRANSFORM = T.Compose([
-    T.Resize(CELL_SIZE, interpolation=T.InterpolationMode.BICUBIC),
-    T.CenterCrop(CELL_SIZE),
-    T.ToTensor(),
-])
-_NORMALIZE = T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
-
 
 # ===================== Helper Functions =====================
 
@@ -224,38 +216,35 @@ def sample_uniform_frames(
     return groups, actual_time_span
 
 
-def create_grid_tensor(frames: list) -> Optional[torch.Tensor]:
-    """
-    Create a 384x384 float32 tensor with 4 frames arranged in a 2x2 grid.
+def resize_frame(image: Image.Image, target_size: int) -> Image.Image:
+    """Match the LANCZOS resize used by all runtime grid constructors."""
+    return image.resize((target_size, target_size), Image.Resampling.LANCZOS)
 
-    Each frame cell is 182x182 (13 ViT patches of 14px each).  A 14px gap
-    (exactly 1 patch) is left between the cells so that no ViT patch ever
-    spans two frame boundaries.  The remaining 6px at the far right/bottom
-    edge is left as zeros.
+
+def create_grid_image(frames: list) -> Optional[Image.Image]:
+    """
+    Create a 384x384 RGB image with four frames arranged in a 2x2 grid.
+
+    Each frame cell is 191x191 and a 2px gray separator is inserted between
+    cells, matching the grid construction used at evaluation and precompute.
 
     Grid layout (reading / temporal order):
         [1: top-left ] [2: top-right  ]
         [3: bot-left ] [4: bot-right  ]
 
-    Returns a normalized (mean=0.5, std=0.5) fp32 tensor of shape (3, 384, 384),
-    or None if fewer than QUERY_INTERVAL valid frames are available.
+    Returns an unnormalized RGB image. PaliGemma's processor applies model
+    normalization while loading the image during training.
     """
     valid = [f for f in frames if f is not None]
     if len(valid) < QUERY_INTERVAL:
         return None
 
-    grid = torch.zeros((3, TOTAL_SIZE, TOTAL_SIZE), dtype=torch.float32)
+    grid = Image.new("RGB", (TOTAL_SIZE, TOTAL_SIZE), GRID_SEPARATOR_COLOR)
     for frame, (row_s, col_s) in zip(valid[:QUERY_INTERVAL], CELL_POSITIONS):
-        grid[:, row_s, col_s] = _FRAME_TRANSFORM(frame)
+        cell = resize_frame(frame, CELL_SIZE)
+        grid.paste(cell, (col_s.start, row_s.start))
 
-    return _NORMALIZE(grid)
-
-
-def get_label_text(label: list) -> str:
-    """Convert label list to text string."""
-    if not label:
-        return "Normal"
-    return ", ".join(label)
+    return grid
 
 
 # ===================== Optimized Frame Reader =====================
@@ -439,14 +428,14 @@ class VideoProcessor:
     def __init__(
         self,
         config: SamplingConfig,
-        output_pt_root: str,
+        output_image_root: str,
         video_dir: str,
         video_subdir: str,
         video_ext: str = ".mp4",
         frame_cache_size: int = 200
     ):
         self.config = config
-        self.output_pt_root = output_pt_root
+        self.output_image_root = output_image_root
         self.video_dir = video_dir
         self.video_subdir = video_subdir
         self.video_ext = video_ext
@@ -511,7 +500,7 @@ class VideoProcessor:
             return 0, 0
         
         # Create output folder
-        video_output_folder = os.path.join(self.output_pt_root, safe_video_name)
+        video_output_folder = os.path.join(self.output_image_root, safe_video_name)
         os.makedirs(video_output_folder, exist_ok=True)
         
         n_pos, n_hard_neg = 0, 0
@@ -588,7 +577,7 @@ class VideoProcessor:
         if not reader.open():
             return 0
         
-        video_output_folder = os.path.join(self.output_pt_root, safe_video_name)
+        video_output_folder = os.path.join(self.output_image_root, safe_video_name)
         os.makedirs(video_output_folder, exist_ok=True)
         
         n_easy = 0
@@ -620,29 +609,23 @@ class VideoProcessor:
         is_anomaly: bool,
         label: List[str]
     ) -> Optional[dict]:
-        """Create a training sample from pre-loaded frames, saving as a .pt tensor."""
-        grid_tensor = create_grid_tensor(frames)
-        if grid_tensor is None:
+        """Create a binary PaliGemma training sample from four video frames."""
+        grid_image = create_grid_image(frames)
+        if grid_image is None:
             return None
 
         self.sample_counter[video_name] += 1
         sample_idx = self.sample_counter[video_name]
 
-        pt_filename = f"{video_name}_{sample_idx:05d}.pt"
-        save_path = os.path.join(output_folder, pt_filename)
-        # Save as half-precision to halve disk usage; fp32 is restored during training
-        torch.save(grid_tensor.half(), save_path)
+        image_filename = f"{video_name}_{sample_idx:05d}.png"
+        save_path = os.path.join(output_folder, image_filename)
+        grid_image.save(save_path, format="PNG")
 
-        relative_path = f"train_pt/{video_name}/{pt_filename}"
-
-        if is_anomaly:
-            suffix_text = f"Detection: Yes. Event: {get_label_text(label)}."
-        else:
-            suffix_text = "Detection: No. Event: Normal."
+        relative_path = f"train_images/{video_name}/{image_filename}"
 
         return {
-            "pt": relative_path,
-            "suffix": suffix_text
+            "image": relative_path,
+            "suffix": "Yes" if is_anomaly else "No",
         }
 
 
@@ -652,7 +635,7 @@ class VideoProcessor:
 def process_xd_violence(
     annotations: dict,
     video_dir: str,
-    output_pt_root: str,
+    output_image_root: str,
     video_subdir: str,
     collector: SampleCollector,
     test_mode: bool = False,
@@ -667,7 +650,7 @@ def process_xd_violence(
     
     processor = VideoProcessor(
         config=XD_VIOLENCE_CONFIG,
-        output_pt_root=output_pt_root,
+        output_image_root=output_image_root,
         video_dir=video_dir,
         video_subdir=video_subdir,
     )
@@ -710,7 +693,7 @@ def process_xd_violence(
 def process_ucf_crime(
     annotations: dict,
     video_dir: str,
-    output_pt_root: str,
+    output_image_root: str,
     video_subdir: str,
     collector: SampleCollector,
     test_mode: bool = False,
@@ -727,7 +710,7 @@ def process_ucf_crime(
     
     processor = VideoProcessor(
         config=UCF_CRIME_CONFIG,
-        output_pt_root=output_pt_root,
+        output_image_root=output_image_root,
         video_dir=video_dir,
         video_subdir=video_subdir,
     )
@@ -838,7 +821,7 @@ def main():
                         help="Path to the HIVAU dataset root containing raw_annotations and videos.")
     parser.add_argument("--output-dir", type=str,
                         default=DEFAULT_VAD_TRAIN_ROOT,
-                        help="Directory to save generated training JSON and .pt samples.")
+                        help="Directory to save generated binary JSON files and PNG grid images.")
     parser.add_argument("--test-mode", action="store_true")
     parser.add_argument("--test-samples", type=int, default=5)
     parser.add_argument("--balance-ratio", type=str, default="1:1:1",
@@ -862,8 +845,16 @@ def main():
         args.data_dir, "raw_annotations/xd_database_train.json"
     )
     
-    output_pt_root = os.path.join(args.output_dir, "train_pt")
-    os.makedirs(output_pt_root, exist_ok=True)
+    missing_annotations = [
+        path for path in (ucf_anno_path, xd_anno_path) if not os.path.isfile(path)
+    ]
+    if missing_annotations:
+        parser.error(
+            "Missing Stage-1 training annotations: " + ", ".join(missing_annotations)
+        )
+
+    output_image_root = os.path.join(args.output_dir, "train_images")
+    os.makedirs(output_image_root, exist_ok=True)
     
     # Separate collectors for each dataset
     xd_collector = SampleCollector(dataset_name="XD-Violence")
@@ -880,7 +871,7 @@ def main():
         xd_stats = process_xd_violence(
             annotations=xd_annotations,
             video_dir=args.data_dir,
-            output_pt_root=output_pt_root,
+            output_image_root=output_image_root,
             video_subdir="videos/xd-violence/videos/train/",
             collector=xd_collector,
             test_mode=args.test_mode,
@@ -899,7 +890,7 @@ def main():
         ucf_stats = process_ucf_crime(
             annotations=ucf_annotations,
             video_dir=args.data_dir,
-            output_pt_root=output_pt_root,
+            output_image_root=output_image_root,
             video_subdir="videos/ucf-crime/videos/train/",
             collector=ucf_collector,
             test_mode=args.test_mode,
@@ -918,13 +909,13 @@ def main():
     # Balance and save XD-Violence
     print(f"\nApplying balance ratio {balance_ratio} to XD-Violence...")
     xd_balanced_samples = xd_collector.get_balanced_samples(balance_ratio)
-    xd_json_path = os.path.join(args.output_dir, "xd_violence_train.json")
+    xd_json_path = os.path.join(args.output_dir, "xd_violence_train_binary.json")
     save_dataset_json(xd_balanced_samples, xd_json_path, "XD-Violence")
     
     # Balance and save UCF-Crime
     print(f"\nApplying balance ratio {balance_ratio} to UCF-Crime...")
     ucf_balanced_samples = ucf_collector.get_balanced_samples(balance_ratio)
-    ucf_json_path = os.path.join(args.output_dir, "ucf_crime_train.json")
+    ucf_json_path = os.path.join(args.output_dir, "ucf_crime_train_binary.json")
     save_dataset_json(ucf_balanced_samples, ucf_json_path, "UCF-Crime")
     
     # ===================== Create Combined Dataset =====================
@@ -934,7 +925,7 @@ def main():
     combined_samples = xd_balanced_samples + ucf_balanced_samples
     random.shuffle(combined_samples)
     
-    combined_json_path = os.path.join(args.output_dir, "combined_train.json")
+    combined_json_path = os.path.join(args.output_dir, "combined_train_binary.json")
     save_dataset_json(combined_samples, combined_json_path, "Combined")
     
     # ===================== Save Statistics =====================
@@ -967,13 +958,13 @@ def main():
             "grid_canvas_size": TOTAL_SIZE,
             "cell_size": CELL_SIZE,
             "grid_gap_px": GRID_GAP,
-            "output_format": "fp16 .pt tensor (3, 384, 384), SigLIP-normalized",
+            "output_format": "PNG image (384, 384, 3), normalized by the PaliGemma processor",
             "timestamp_overlay": False
         },
         "output_files": {
-            "xd_violence": "xd_violence_train.json",
-            "ucf_crime": "ucf_crime_train.json",
-            "combined": "combined_train.json"
+            "xd_violence": "xd_violence_train_binary.json",
+            "ucf_crime": "ucf_crime_train_binary.json",
+            "combined": "combined_train_binary.json"
         }
     }
     with open(stats_path, 'w') as f:
@@ -1004,14 +995,14 @@ def main():
     print(f"  UCF-Crime JSON:   {ucf_json_path}")
     print(f"  Combined JSON:    {combined_json_path}")
     print(f"  Statistics:       {stats_path}")
-    print(f"  PT tensors:       {output_pt_root}/")
+    print(f"  Grid images:      {output_image_root}/")
     
     # Print recommended prompt
     print(f"\n{'='*60}")
     print("Recommended Training Prompt:")
     print(f"{'='*60}")
     print("""
-The tensor shows a 2x2 grid of 4 consecutive frames from a surveillance video.
+The image shows a 2x2 grid of 4 temporally ordered frames from a surveillance video.
 The frames are arranged in temporal order:
 - Top-left (1st) → Top-right (2nd) → Bottom-left (3rd) → Bottom-right (4th)
 Analyze these frames and determine if any anomaly is occurring.

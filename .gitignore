@@ -23,6 +23,8 @@ data
 *dataset
 *results
 vad_data
+scripts/train/finetune-hivau/hivau_minimal.json
 *sbatch
 ablation
 baseline
+precomputed

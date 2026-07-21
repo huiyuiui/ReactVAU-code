@@ -1,4 +1,13 @@
 #!/bin/bash
+
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+
 # PaliGemma Video Anomaly Detection Evaluation Script (single RTX 4090)
 # Local version aligned with scripts/sbatch/eval_paligemma_vad_sbatch.sh.
 
@@ -56,7 +65,6 @@ METHOD="${METHOD:-logits}"  # logits or generate
 
 # PaliGemma-only eval can usually use a larger batch than the combined pipeline.
 BATCH_SIZE="${BATCH_SIZE:-16}"
-PROMPT_STYLE="${PROMPT_STYLE:-detail}"
 ATTN_IMPLEMENTATION="${ATTN_IMPLEMENTATION:-sdpa}"
 
 # ==========================================
@@ -117,7 +125,6 @@ echo "  Target FPS: $TARGET_FPS"
 echo "  Query Interval: $QUERY_INTERVAL"
 echo "  Method: $METHOD"
 echo "  Batch Size: $BATCH_SIZE"
-echo "  Prompt Style: $PROMPT_STYLE"
 echo "  Attention: $ATTN_IMPLEMENTATION"
 echo ""
 echo "Output: $OUTPUT_PATH"
@@ -140,7 +147,6 @@ python "${PROJECT_ROOT}/eval_utils/vad/eval_paligemma_detection.py" \
     --query-interval "$QUERY_INTERVAL" \
     --method "$METHOD" \
     --batch-size "$BATCH_SIZE" \
-    --prompt-style "$PROMPT_STYLE" \
     --attn-implementation "$ATTN_IMPLEMENTATION" \
     --dataset "$DATASET" \
     --video-dir "$VIDEO_DIR" \

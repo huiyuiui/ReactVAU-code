@@ -1,4 +1,13 @@
 #!/bin/bash
+
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+
 # ReactVAU HIVAU understanding evaluation on a single RTX 4090.
 # Local non-SLURM version of scripts/sbatch/eval_reactvau_hivau_sbatch.sh.
 
@@ -38,7 +47,6 @@ PALIGEMMA_VISION_FEATURE_LAYER="${PALIGEMMA_VISION_FEATURE_LAYER:--2}"
 
 # Keep this conservative for a 24GB 4090. Override with PALIGEMMA_BATCH_SIZE=32 if memory allows.
 PALIGEMMA_BATCH_SIZE="${PALIGEMMA_BATCH_SIZE:-1}"
-PALIGEMMA_PROMPT_STYLE="${PALIGEMMA_PROMPT_STYLE:-detail}"
 PALIGEMMA_ATTN="${PALIGEMMA_ATTN:-sdpa}"
 
 STREAMFOREST_CONV_TEMPLATE="${STREAMFOREST_CONV_TEMPLATE:-qwen_2}"
@@ -57,7 +65,7 @@ TARGET_FPS="${TARGET_FPS:-4}"
 QUERY_INTERVAL="${QUERY_INTERVAL:-4}"
 
 # none matches the HIVAU finetuning distribution most closely; score adds PG text context.
-CONTEXT_MODE="${CONTEXT_MODE:-none}"  # none, score, description
+CONTEXT_MODE="${CONTEXT_MODE:-none}"  # none, score
 ANOMALY_THRESHOLD="${ANOMALY_THRESHOLD:-0.4}"
 SF_ENHANCE_MEMORY="${SF_ENHANCE_MEMORY:-true}"
 SF_PROMPT_STYLE="${SF_PROMPT_STYLE:-default}"
@@ -141,7 +149,6 @@ echo "  SF Prompt Style: $SF_PROMPT_STYLE"
 echo "  Memory Enhancement (APS): $SF_ENHANCE_MEMORY"
 echo "  Anomaly Threshold: $ANOMALY_THRESHOLD"
 echo "  PaliGemma Batch Size: $PALIGEMMA_BATCH_SIZE"
-echo "  PaliGemma Prompt Style: $PALIGEMMA_PROMPT_STYLE"
 echo ""
 echo "Output: $OUTPUT_PATH"
 echo "=========================================="
@@ -159,7 +166,6 @@ python "${PROJECT_ROOT}/eval_utils/hivau/eval_reactvau_hivau.py" \
     --paligemma-model-path "$PALIGEMMA_MODEL_PATH" \
     $PG_LORA_FLAG \
     $PG_VISION_FLAGS \
-    --paligemma-prompt-style "$PALIGEMMA_PROMPT_STYLE" \
     --paligemma-attn "$PALIGEMMA_ATTN" \
     --paligemma-batch-size "$PALIGEMMA_BATCH_SIZE" \
     --streamforest-model-path "$STREAMFOREST_MODEL_PATH" \

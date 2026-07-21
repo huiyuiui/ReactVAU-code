@@ -1,3 +1,11 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+
 import datetime
 import json
 import os
@@ -19,28 +27,8 @@ from loguru import logger as eval_logger
 from pycocoevalcap.eval import Bleu, Cider, COCOEvalCap, Meteor, Rouge, Spice
 from pycocoevalcap.tokenizer.ptbtokenizer import PTBTokenizer
 from tqdm import tqdm
-
-# import lmms_eval.tasks._task_utils.file_utils as file_utils
-# from lmms_eval.filters.extraction import ExtendedRegexFilter
-
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 
-# import nltk
-# nltk.download('punkt')
-# from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
-# from nltk.tokenize import word_tokenize
-# from rouge import Rouge
-
-
-# with open(Path(__file__).parent / "_default_template_yaml", "r") as f:
-#     raw_data = f.readlines()
-#     safe_data = []
-#     for i, line in enumerate(raw_data):
-#         # remove function definition since yaml load cannot handle it
-#         if "!function" not in line:
-#             safe_data.append(line)
-
-#     config = yaml.safe_load("".join(safe_data))
 
 
 def get_full_bleu(reference, hypothesis):
@@ -81,30 +69,7 @@ def calculate_rouge(reference, hypothesis):
     return score
 
 
-# A bit ugly here
-# But the idea is that we will unzip all the zip files
-# To HF HOME cache dir
-# And load it here
-# HF_HOME = os.getenv("HF_HOME", "~/.cache/huggingface/")
-# cache_dir = config["dataset_kwargs"]["cache_dir"]
-# cache_dir = os.path.join(HF_HOME, cache_dir)
-# cache_dir = os.path.join(cache_dir, "videos")
-
 from loguru import logger as eval_logger
-
-
-# Pass in video path here
-# Can only work correctly with video llm
-# def hivau_doc_to_visual(doc):
-#     video_path = doc["video_name"]
-#     video_path = os.path.join(cache_dir, video_path)
-#     if os.path.exists(video_path):
-#         video_path = video_path
-#     elif os.path.exists(video_path.replace("mp4", "MP4")):
-#         video_path = video_path.replace("mp4", "MP4")
-#     else:
-#         sys.exit(f"video path:{video_path} does not exist, please check")
-#     return [video_path]
 
 
 # This is the place where you format your question

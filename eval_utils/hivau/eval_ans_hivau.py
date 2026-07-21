@@ -1,3 +1,11 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+
 import sys
 import os
 import json
@@ -7,21 +15,6 @@ from itertools import zip_longest
 from collections import defaultdict
 import numpy as np
 from tqdm import tqdm
-
-# Add the directory containing moverscore_v2 to the Python path
-# moverscore_path = "/home/henry/HD/VAD/emnlp19-moverscore"
-# if moverscore_path not in sys.path:
-#     sys.path.append(moverscore_path)
-# from moverscore_v2 import word_mover_score
-
-# Add CUVA evaluation utils path
-# cuva_path = "/home/rita/HD/VAD/lmms-eval/lmms_eval"
-# if cuva_path not in sys.path:
-#     sys.path.append(cuva_path)
-
-# from tasks.cuva.utils_dqa import cuva_BLEU_tasks
-# from tasks.cuva.utils_dqa import cuva_ROUGE
-# from tasks.cuva.utils_dqa import cuva_BLEURT
 
 from hivau_utils import hivau_BLEU, hivau_ROUGE, hivau_CIDEr, hivau_METEOR
 

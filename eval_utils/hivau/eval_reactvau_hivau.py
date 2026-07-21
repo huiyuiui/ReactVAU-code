@@ -1,3 +1,11 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+
 """
 ReactVAU HIVAU Understanding Evaluation (PaliGemma + StreamForest)
 
@@ -9,14 +17,13 @@ Pipeline for Understanding:
        Every query_interval frames (default 4, = 1 second) → 2x2 grid → PaliGemma detection.
        Simultaneously, the last frame of each group is fed into StreamForest's MemoryManager.
     2. After full video processing:
-       - PaliGemma provides detection context (anomaly segments, optional descriptions)
+       - PaliGemma provides score-based detection context (anomaly segments)
        - StreamForest generates understanding response using accumulated visual memory + PG context
     3. Metrics: BLEU, ROUGE, CIDEr, METEOR
 
 Context Injection Modes (--context-mode):
     - "none":        No PG context injected (equivalent to standalone StreamForest)
     - "score":       PG anomaly scores summary embedded in prompt
-    - "description": PG scores + descriptions embedded in prompt (slower, requires describe_grid)
 """
 import sys
 import os
@@ -44,7 +51,7 @@ ReactVAU_ROOT = os.path.dirname(os.path.dirname(
 if ReactVAU_ROOT not in sys.path:
     sys.path.insert(0, ReactVAU_ROOT)
 
-from vad.get_prompt import get_grid_prompt, PALIGEMMA_DESCRIBE_PROMPT
+from vad.get_prompt import get_grid_prompt
 import types
 from safetensors.torch import load_file as safetensors_load_file
 from peft import PeftModel
@@ -297,25 +304,6 @@ class PaliGemmaDetector:
             final_scores[orig_idx] = score
         return final_scores
 
-    def describe_grid(self, grid_image: Image.Image) -> str:
-        """Generate a short anomaly description from a grid image."""
-        if grid_image is None:
-            return ""
-        full_prompt = f"<image>{PALIGEMMA_DESCRIBE_PROMPT}"
-        inputs = self.processor(
-            text=full_prompt, images=grid_image, return_tensors="pt").to(self.device)
-        if "pixel_values" in inputs:
-            inputs["pixel_values"] = inputs["pixel_values"].to(
-                self.torch_dtype)
-
-        with torch.inference_mode():
-            input_len = inputs["input_ids"].shape[1]
-            outputs = self.model.generate(
-                **inputs, max_new_tokens=60, do_sample=False)
-            generated_ids = outputs[0, input_len:]
-            return self.processor.tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-
-
 # ===================== StreamForest Reasoning Module =====================
 class StreamForestReasoner:
     """StreamForest-Qwen2-7B based deep reasoning module with visual memory."""
@@ -462,7 +450,7 @@ class ReactVAUUnderstanding:
             - Every query_interval frames (1 sec): create 2x2 grid → PaliGemma detection
             - Simultaneously: feed last frame of each group into StreamForest memory
         Phase 2 — Context Building:
-            - Collect PaliGemma detection context (anomaly segments, optional descriptions)
+            - Collect score-based PaliGemma detection context (anomaly segments)
             - Build enhanced prompt: PG context + original question
         Phase 3 — Answer Generation:
             - StreamForest generates text answer using accumulated visual memory
@@ -473,7 +461,7 @@ class ReactVAUUnderstanding:
         paligemma_detector: PaliGemmaDetector,
         streamforest_reasoner: StreamForestReasoner,
         anomaly_threshold: float = 0.5,
-        context_mode: str = "score",
+        context_mode: str = "none",
         paligemma_prompt: str = "",
         max_context_segments: int = 10,
         enable_memory_enhancement: bool = False,
@@ -539,16 +527,7 @@ class ReactVAUUnderstanding:
                 "Use your own visual analysis as primary evidence."
             )
 
-        if self.context_mode == "description":
-            context = (
-                f"[Detection Module Reference]\n"
-                f"A lightweight detection module has pre-scanned this video{duration_str}. "
-                f"{n} segment(s) were flagged as potentially anomalous:\n"
-            )
-            for seg in top_segments:
-                context += f"  - t={seg['time']:.1f}s (confidence: {seg['score']*100:.0f}%): {seg['description']}\n"
-            context += false_alarm_note
-        elif self.context_mode == "score":
+        if self.context_mode == "score":
             context = (
                 f"[Detection Module Reference]\n"
                 f"A lightweight detection module has pre-scanned this video{duration_str}. "
@@ -701,12 +680,7 @@ class ReactVAUUnderstanding:
                     "query_idx": query_idx,
                     "time": query_time,
                     "score": pg_score,
-                    "description": "",
                 }
-                # Generate description if needed
-                if self.context_mode == "description":
-                    seg_info["description"] = self.paligemma.describe_grid(
-                        grid_images[query_idx])
                 anomaly_segments.append(seg_info)
 
         # Free grid images
@@ -851,9 +825,6 @@ def main():
                         help="Path to base PaliGemma2 model")
     parser.add_argument("--paligemma-lora-path", type=str, default=None,
                         help="Path to PaliGemma LoRA adapter")
-    parser.add_argument("--paligemma-prompt-style", type=str, default="detail",
-                        choices=["detail"],
-                        help="PaliGemma prompt style used by the current ReactVAU model")
     parser.add_argument("--paligemma-attn", type=str, default="eager",
                         choices=["eager", "sdpa", "flash_attention_2"])
     parser.add_argument("--paligemma-image-size", type=int, default=448, choices=[384, 448],
@@ -879,11 +850,10 @@ def main():
     parser.add_argument("--anomaly-threshold", type=float, default=0.5,
                         help="PaliGemma score threshold for anomaly context")
     parser.add_argument("--context-mode", type=str, default="score",
-                        choices=["none", "score", "description"],
+                        choices=["none", "score"],
                         help="PG context injection mode: "
                              "'none' (no PG context, same as standalone SF), "
-                             "'score' (PG anomaly scores in prompt), "
-                             "'description' (PG scores + descriptions, slower)")
+                             "'score' (PG anomaly scores in prompt)")
     parser.add_argument("--enable-memory-enhancement", action="store_true",
                         help="Enable APS (Anomaly Priority Score) protection in PEMF "
                              "long memory and Anomaly Pool text-based context injection. "
@@ -1003,9 +973,7 @@ def main():
     logging.info("=" * 70)
 
     # PaliGemma prompt
-    pg_prompt = get_grid_prompt(
-        add_special_tokens=False, style=args.paligemma_prompt_style)
-    logging.info(f"PaliGemma prompt style: {args.paligemma_prompt_style}")
+    pg_prompt = get_grid_prompt(add_special_tokens=False)
     logging.info(f"PaliGemma prompt: '{pg_prompt}'")
 
     # ---- Initialize Models ----

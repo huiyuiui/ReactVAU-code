@@ -1,16 +1,26 @@
-#    Copyright 2023 Haotian Liu
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
-#    Licensed under the Apache License, Version 2.0 (the "License");
-#    you may not use this file except in compliance with the License.
-#    You may obtain a copy of the License at
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+
+# --------------------------------------------------------
+# Portions Copyright 2023 Haotian Liu
 #
-#        http://www.apache.org/licenses/LICENSE-2.0
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#    Unless required by applicable law or agreed to in writing, software
-#    distributed under the License is distributed on an "AS IS" BASIS,
-#    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#    See the License for the specific language governing permissions and
-#    limitations under the License.
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# --------------------------------------------------------
 
 
 from abc import ABC, abstractmethod
@@ -325,7 +335,6 @@ class LlavaMetaForCausalLM(ABC):
 
     def encode_image_video_memory(self, images_list, video_idx_in_batch):
         assert len(video_idx_in_batch)<2, "<<<encode_image_video_memory>>> i dont want to process multiple image or video"
-        # input: list output: list image和video没法concat呀
         # print("images_list shape: ", images_list[0].shape)
         concat_images = torch.cat([image for image in images_list], dim=0)
         split_sizes = [image.shape[0] for image in images_list] 
@@ -1094,10 +1103,10 @@ class LlavaMetaForCausalLM(ABC):
                         new_image_features.append(image_feat)
                 image_features = new_image_features
             # print("<<< Mark1 >>> mm_patch_merge_type: ", mm_patch_merge_type)
-            if mm_patch_merge_type == "flat":       #SigLIP版本走这里
+            if mm_patch_merge_type == "flat":       # SigLIP version
                 # print("<<< Warning >>> Maybe I dont want to flat...")
                 image_features = [x.flatten(0, 1) for x in image_features]
-            elif mm_patch_merge_type.startswith("spatial"):  #UMT版本走这里
+            elif mm_patch_merge_type.startswith("spatial"):  # UMT version
                 # print("<<< Warning >>> Maybe I dont want to spatial merge...")
                 new_image_features = []
                 for image_idx, image_feature in enumerate(image_features):
@@ -1159,7 +1168,7 @@ class LlavaMetaForCausalLM(ABC):
                         else:
                             frame_feature = image_feature
 
-                        if "pad" in mm_patch_merge_type: # unpad和nopad都算
+                        if "pad" in mm_patch_merge_type: # unpad or nopad
                             if mm_newline_position == 'one_token':
                                 frame_feature = frame_feature.flatten(0, 1)
                                 if "unpad" in mm_patch_merge_type:

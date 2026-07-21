@@ -1,3 +1,11 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+
 #!/usr/bin/env python3
 """
 Pre-compute PaliGemma anomaly scores for HIVAU training videos.
@@ -352,14 +360,11 @@ def main():
                             os.path.join(default_ckpt_root, "extracted_weights/streamforest_vision_encoder_with_prefix.safetensors")))
     parser.add_argument("--paligemma-vision-feature-layer", type=int, default=-2)
     parser.add_argument("--paligemma-attn", type=str, default="sdpa")
-    parser.add_argument("--paligemma-prompt-style", type=str, default="detail",
-                        choices=["detail"])
 
     # Data configuration
     parser.add_argument("--anno-path", type=str,
-                        default=os.environ.get(
-                            "HIVAU_TRAIN_JSON",
-                            os.path.join(default_project_root, "scripts/train/finetune-hivau/hivau_minimal.json")))
+                        default=os.environ.get("HIVAU_TRAIN_JSON", ""),
+                        help="Downloaded HIVAU training annotation JSON path")
     parser.add_argument("--data-root", type=str,
                         default=default_hivau_video_root)
 
@@ -380,6 +385,13 @@ def main():
 
     args = parser.parse_args()
 
+    if not args.anno_path:
+        parser.error(
+            "--anno-path is required; set HIVAU_TRAIN_JSON in paths.local.sh "
+            "or pass --anno-path explicitly.")
+    if not os.path.isfile(args.anno_path):
+        parser.error(f"HIVAU training annotation not found: {args.anno_path}")
+
     # Setup
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
 
@@ -388,7 +400,7 @@ def main():
     from vad.get_prompt import get_grid_prompt
 
     # PG prompt (must match eval)
-    pg_prompt = get_grid_prompt(add_special_tokens=False, style=args.paligemma_prompt_style)
+    pg_prompt = get_grid_prompt(add_special_tokens=False)
     logging.info(f"PG prompt: '{pg_prompt}'")
 
     # Load annotation

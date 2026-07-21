@@ -1,4 +1,13 @@
 #!/bin/bash
+
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+
 # Central path configuration for ReactVAU scripts.
 #
 # Public defaults are GitHub-safe. For local private paths, create
@@ -42,8 +51,9 @@ export PALIGEMMA_SF_WEIGHTS="${PALIGEMMA_SF_WEIGHTS:-${CKPT_ROOT}/extracted_weig
 export STREAMFOREST_MODEL_BASE="${STREAMFOREST_MODEL_BASE:-${CKPT_ROOT}/StreamForest-Qwen2-7B_Siglip}"
 export REACTVAU_CHECKPOINT_PATH="${REACTVAU_CHECKPOINT_PATH:-${CKPT_ROOT}/hivau-finetune/streamforest-pg-mem-v2/checkpoint-48579}"
 
-# HIVAU training annotations and precomputed scores.
-export HIVAU_TRAIN_JSON="${HIVAU_TRAIN_JSON:-${REACTVAU_ROOT}/scripts/train/finetune-hivau/hivau_minimal.json}"
+# HIVAU training annotations and precomputed scores. Set HIVAU_TRAIN_JSON in
+# paths.local.sh after obtaining the dataset annotation from its provider.
+export HIVAU_TRAIN_JSON="${HIVAU_TRAIN_JSON:-}"
 export PG_SCORES_PATH="${PG_SCORES_PATH:-${REACTVAU_ROOT}/precomputed/pg_scores_hivau_train.json}"
 
 reactvau_activate_conda() {

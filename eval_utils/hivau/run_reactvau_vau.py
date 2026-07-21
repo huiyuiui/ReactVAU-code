@@ -1,4 +1,11 @@
-#!/usr/bin/env python3
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+
 """
 ReactVAU Single Video VAU Inference
 Run the full PaliGemma + StreamForest pipeline on an individual video file.
@@ -63,9 +70,6 @@ def main():
                         help="Vision encoder layer for feature extraction")
     parser.add_argument("--pg-batch-size", type=int, default=32,
                         help="PaliGemma batch size")
-    parser.add_argument("--pg-prompt-style", type=str, default="detail",
-                        choices=["detail"],
-                        help="PaliGemma prompt style used by the current ReactVAU model")
     parser.add_argument("--pg-attn", type=str, default="sdpa",
                         choices=["eager", "sdpa", "flash_attention_2"],
                         help="PaliGemma attention implementation")
@@ -83,7 +87,7 @@ def main():
 
     # Pipeline
     parser.add_argument("--context-mode", type=str, default="score",
-                        choices=["none", "score", "description"],
+                        choices=["none", "score"],
                         help="PG context injection mode")
     parser.add_argument("--anomaly-threshold", type=float, default=0.4,
                         help="PG anomaly threshold for context")
@@ -147,7 +151,6 @@ def main():
         paligemma_vision_feature_layer=args.pg_vision_layer,
         paligemma_attn=args.pg_attn,
         paligemma_batch_size=args.pg_batch_size,
-        paligemma_prompt_style=args.pg_prompt_style,
         streamforest_model_path=args.sf_model_path,
         streamforest_model_base=args.sf_model_base,
         streamforest_conv_template=args.sf_conv_template,

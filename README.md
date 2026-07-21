@@ -1,200 +1,82 @@
-# ReactVAU
+# ReactVAU: A Slow-Fast Decoupled Framework for Streaming Video Anomaly Understanding
 
-ReactVAU is a streaming video anomaly detection and understanding framework.
-It uses a lightweight detection module to produce per-second anomaly scores and
-a video-language reasoning module with score-aware memory to perform deeper
-verification and video understanding.
+<p align="center">
+  <a href="https://huiyuiui.github.io/ReactVAU/">Project Page</a>
+</p>
 
-## Highlights
+ReactVAU is a Slow-Fast Decoupled Framework for causal, streaming Video Anomaly Understanding (VAU). It separates continuous lightweight anomaly monitoring from heavyweight semantic reasoning, so normal video streams do not repeatedly invoke a large multimodal language model.
 
-- Streaming inference: one anomaly query per second by default.
-- Two-stage training: detection fine-tuning followed by ReactVAU understanding
-  fine-tuning.
-- Precomputed detector scores for efficient score-aware memory training.
-- Online visual memory with SFTW, PEMF, APS, and Anomaly Pool support.
-- VAD evaluation on UCF-Crime/XD-Violence style annotations.
-- HIVAU understanding evaluation with BLEU, ROUGE, CIDEr, and METEOR.
+<p align="center">
+  <img src="assets/teaser.png" width="100%" alt="Comparison between an always-on online model and ReactVAU" />
+</p>
 
-## Method Overview
+## Introduction
 
-ReactVAU contains two interacting modules:
+Conventional VAU systems commonly require access to the complete video, which conflicts with real deployment where future frames are unavailable. ReactVAU operates causally: it observes only the current and past stream, produces one Fast-module score per second by default, and invokes the Slow module only for suspicious intervals.
 
-1. **Detection module**  
-   A PaliGemma2-based binary anomaly detector. Frames are sampled at 4 FPS and
-   grouped into a 2x2 grid, so each query covers about one second. The anomaly
-   score is computed from the Yes/No logits.
+The framework consists of three components:
 
-2. **Reasoning module**  
-   A StreamForest-style video-language model. During streaming inference, the
-   model updates visual memory every second. High detector scores can trigger
-   deeper reasoning for VAD, while HIVAU understanding uses the accumulated
-   memory to answer the final question after the video stream ends.
+1. **Fast Detection Module.** PaliGemma2-3B applies Spatial Grid Folding (SGF): four frames sampled at 4 FPS are folded into one 2x2 grid and scored through the `Yes`/`No` logits.
+2. **Anomaly-Aware Persistent Memory (AAPM).** The Fast anomaly score protects suspicious evidence during memory compression through the Anomaly Priority Score (APS), the Anomaly Pool, and dense Real-Time Perception for triggered intervals.
+3. **Slow Reasoning Module.** A StreamForest-7B backbone remains dormant during normal streaming. When triggered, it verifies the event from the AAPM memory and produces a semantic explanation.
 
-For the second training stage, detector scores are precomputed for all HIVAU
-training videos. These scores are aligned to sampled frames and passed into the
-memory/projector module so APS and Anomaly Pool receive the same score signal
-during training and evaluation.
+<p align="center">
+  <img src="assets/reactvau.png" width="100%" alt="ReactVAU architecture" />
+</p>
 
-## Project Structure
+## Preparation
 
-```text
-ReactVAU/
-  README.md
-  scripts/
-    config/
-      paths.sh                         # shared path/config defaults
-    train/
-      finetune-vad/
-        train_paligemma_vad_384.sh
-        train_paligemma_vad_384_binary.sh
-      finetune-hivau/
-        finetune_reactvau.sh
-        hivau_finetune.yaml
-        hivau_minimal.json
-    precompute/
-      precompute_pg_scores.py
-      verify_scores.py
-    eval/
-      run_eval_paligemma_detect.sh
-      run_eval_reactvau_detect.sh
-      run_eval_reactvau_hivau.sh
-  vad/
-    train_paligemma_vad_384.py
-    get_prompt.py
-  eval_utils/
-    vad/
-      eval_paligemma_detection.py
-      eval_reactvau_detection.py
-    hivau/
-      eval_reactvau_hivau.py
-      run_reactvau_vau.py
-      reactvau_inference.py
-      hivau_utils.py
-  llava/
-    train/
-      train.py
-      train_mem.py
-    model/
-      multimodal_projector/
-        projector_FSTW_PEMF.py
-        memory_manager.py
-  precomputed/
-    pg_scores_hivau_train.json
-```
+### Environment
 
-## Installation
-
-Create a Python environment and install the required packages:
+ReactVAU is tested on Linux with Python 3.10 and CUDA-enabled GPUs. Create an environment, install the PyTorch build matching your CUDA version, then install the release dependencies.
 
 ```bash
 conda create -n ReactVAU python=3.10
 conda activate ReactVAU
 
-# Install PyTorch for your CUDA version first.
-# Then install the project dependencies.
+# Install the PyTorch build matching your CUDA version first.
 pip install -r requirements.txt
 ```
 
-The code uses PyTorch, Transformers, PEFT, Accelerate, DeepSpeed,
-bitsandbytes, safetensors, OpenCV, Pillow, decord, scikit-learn, tqdm, loguru,
-TensorBoard, pycocoevalcap, and NLTK.
+Alternatively, create the supplied Conda environment with `conda env create -f environment.yml`. HIVAU metric evaluation requires a Java runtime for METEOR.
 
-## Configuration
+### Paths and checkpoints
 
-All maintained shell scripts read common paths from:
-
-```text
-scripts/config/paths.sh
-```
-
-You can edit this file directly or create a private local override:
-
-```text
-scripts/config/paths.local.sh
-```
-
-`paths.local.sh` is loaded automatically by `paths.sh`. A typical local config
-looks like:
+All maintained shell scripts load [`scripts/config/paths.sh`](scripts/config/paths.sh). Configure local paths before running the code:
 
 ```bash
-export REACTVAU_ROOT="/path/to/ReactVAU"
-export CKPT_ROOT="${REACTVAU_ROOT}/ckpt"
-export HIVAU_ROOT="/path/to/HIVAU-70k"
-export HIVAU_VIDEO_ROOT="${HIVAU_ROOT}/videos"
-
-export CONDA_ENV="ReactVAU"
-export CONDA_BASE="${HOME}/miniconda3"
-export CUDA_HOME="/usr/local/cuda-12.1"
-
-export PALIGEMMA_MODEL_PATH="${CKPT_ROOT}/paligemma2-3b-mix-448"
-export PALIGEMMA_LORA_PATH="${CKPT_ROOT}/paligemma2-3b-vad-lora-384-combined-binary/training_384"
-export PALIGEMMA_SF_WEIGHTS="${CKPT_ROOT}/extracted_weights/streamforest_vision_encoder_with_prefix.safetensors"
-
-export STREAMFOREST_MODEL_BASE="${CKPT_ROOT}/StreamForest-Qwen2-7B_Siglip"
-export REACTVAU_CHECKPOINT_PATH="${CKPT_ROOT}/hivau-finetune/<reactvau-checkpoint>"
-export PG_SCORES_PATH="${REACTVAU_ROOT}/precomputed/pg_scores_hivau_train.json"
+cp scripts/config/paths.sh scripts/config/paths.local.sh
 ```
 
-Every variable can also be overridden from the command line:
-
-```bash
-HIVAU_ROOT=/path/to/HIVAU-70k TEST_MODE=true bash scripts/eval/run_eval_reactvau_hivau.sh
-```
-
-## Checkpoints
-
-Place model weights under `ckpt/`:
+Set the dataset and checkpoint roots in `paths.local.sh`. Download the released ReactVAU adapters and required backbone assets, then arrange them as follows:
 
 ```text
 ckpt/
-  paligemma2-3b-mix-448/
+  paligemma2-3b-mix-448/                         # PaliGemma2 base checkpoint
   extracted_weights/
     streamforest_vision_encoder_with_prefix.safetensors
-  paligemma2-3b-vad-lora-384-combined-binary/
+  paligemma2-3b-vad-lora-384-combined-binary/    # Stage-1 Fast module adapter
     training_384/
-  StreamForest-Qwen2-7B_Siglip/
+  StreamForest-Qwen2-7B_Siglip/                  # StreamForest backbone
   hivau-finetune/
-    <reactvau-checkpoint>/
+    <reactvau-checkpoint>/                        # Stage-2 ReactVAU adapter
 ```
 
-`paligemma2-3b-mix-448` is the PaliGemma2 base checkpoint. The extracted
-StreamForest vision weights are used to adapt PaliGemma detection to the
-384x384 StreamForest vision setting. `StreamForest-Qwen2-7B_Siglip` is used as
-the video-language reasoning backbone.
+### Checkpoints
 
-## Dataset Preparation
+Download the required checkpoints and place them at the listed location, or override the corresponding variable in `paths.local.sh`.
 
-### Detection Training Data
+| Component | Download | Default location | Required files |
+| --- | --- | --- | --- |
+| PaliGemma2-3B base model | Official release | `ckpt/paligemma2-3b-mix-448/` | Base-model files from the official release |
+| StreamForest vision encoder | ReactVAU release | `ckpt/extracted_weights/` | `streamforest_vision_encoder_with_prefix.safetensors` |
+| ReactVAU Fast Module | ReactVAU release | `ckpt/paligemma2-3b-vad-lora-384-combined-binary/training_384/` | LoRA adapter and configuration |
+| StreamForest-7B base model | Official release | `ckpt/StreamForest-Qwen2-7B_Siglip/` | Base-model files required by StreamForest |
+| ReactVAU Slow Module | ReactVAU release | `ckpt/hivau-finetune/<reactvau-checkpoint>/` | Stage-2 adapter/projector weights and configuration |
 
-The detection module expects 2x2 grid-image training data:
+### Datasets
 
-```text
-vad/vad_data/paligemma_train/
-  combined_train_binary.json
-  ucf_crime_train_binary.json
-  xd_violence_train_binary.json
-  <grid image files>
-```
-
-Each JSON item should contain an image path relative to `VAD_TRAIN_ROOT` and a
-binary suffix:
-
-```json
-[
-  {
-    "image": "relative/path/to/grid_image.jpg",
-    "suffix": "Yes"
-  },
-  {
-    "image": "relative/path/to/grid_image.jpg",
-    "suffix": "No"
-  }
-]
-```
-
-### HIVAU Data
-
-Set `HIVAU_ROOT` to a folder with the following structure:
+ReactVAU uses UCF-Crime and XD-Violence for anomaly detection, and HIVAU-70K for anomaly understanding. Obtain all datasets from their official sources and follow their licenses. Set `HIVAU_ROOT` to a directory containing:
 
 ```text
 HIVAU-70k/
@@ -203,182 +85,36 @@ HIVAU-70k/
     xd-violence/
   instruction/
     detection/
-      ucf_crime_detection_test.json
-      xd_violence_detection_test.json
     merge_instruction_test_final.jsonl
   raw_annotations/
+    ucf_database_train.json
+    xd_database_train.json
     ucf_database_test_anno.txt
     xd_database_test_anno.txt
 ```
 
-HIVAU fine-tuning uses:
+The training metadata must retain the video paths expected by the grid-data generator:
 
 ```text
-scripts/train/finetune-hivau/hivau_minimal.json
-scripts/train/finetune-hivau/hivau_finetune.yaml
+HIVAU-70k/
+  videos/
+    ucf-crime/videos/train/<video_name>.mp4
+    xd-violence/videos/train/<video_name>.mp4
 ```
 
-The YAML format is:
-
-```yaml
-datasets:
-  - json_path: scripts/train/finetune-hivau/hivau_minimal.json
-    data_root: /path/to/HIVAU-70k/videos
-    sampling_strategy: all
-    media_type: video
-    video_read_type: decord
-
-pg_scores_path: precomputed/pg_scores_hivau_train.json
-```
-
-The training script also generates a run-local YAML file so `DATA_JSON`,
-`DATA_ROOT`, and `PG_SCORES_PATH` can be overridden without editing the repo
-file.
-
-## Training
-
-### Stage 1: Detection Module
-
-Train the PaliGemma2 VAD detector on the combined binary detection dataset:
+HIVAU training annotations are not distributed with this repository. Obtain the HIVAU instruction files from the dataset provider, then set the local annotation path in `paths.local.sh`:
 
 ```bash
-cd /path/to/ReactVAU
-bash scripts/train/finetune-vad/train_paligemma_vad_384_binary.sh
+export HIVAU_TRAIN_JSON="/path/to/HIVAU-70k/instruction/train.json"
 ```
 
-The script uses 384x384 inputs, StreamForest vision encoder weights,
-second-to-last vision features (`vision_feature_layer=-2`), frozen vision
-encoder, LoRA on the language model, and projector fine-tuning.
+The required PaliGemma score file is generated during the Stage 2 preparation step below.
 
-Useful overrides:
+## Evaluation and Inference
 
-```bash
-BATCH_SIZE=4 GRAD_ACCUM=8 \
-OUTPUT_DIR=ckpt/paligemma2-3b-vad-lora-384-combined-binary/training_384 \
-bash scripts/train/finetune-vad/train_paligemma_vad_384_binary.sh
-```
+All commands below are run from the repository root after `paths.local.sh` has been configured.
 
-### Stage 1 Evaluation: PaliGemma-Only VAD
-
-```bash
-DATASET=ucf-crime TEST_MODE=true TEST_SAMPLES=10 \
-bash scripts/eval/run_eval_paligemma_detect.sh
-
-DATASET=xd-violence TEST_MODE=true TEST_SAMPLES=10 \
-bash scripts/eval/run_eval_paligemma_detect.sh
-```
-
-Set `TEST_MODE=false` for the full evaluation.
-
-### Precompute Detector Scores
-
-Before Reasoning Module fine-tuning, precompute PaliGemma anomaly scores for the HIVAU
-training videos:
-
-```bash
-source scripts/config/paths.sh
-
-python scripts/precompute/precompute_pg_scores.py \
-  --paligemma-model-path "${PALIGEMMA_MODEL_PATH}" \
-  --paligemma-lora-path "${PALIGEMMA_LORA_PATH}" \
-  --paligemma-image-size 384 \
-  --paligemma-streamforest-weights "${PALIGEMMA_SF_WEIGHTS}" \
-  --paligemma-vision-feature-layer -2 \
-  --paligemma-attn sdpa \
-  --paligemma-prompt-style detail \
-  --anno-path scripts/train/finetune-hivau/hivau_minimal.json \
-  --data-root "${HIVAU_VIDEO_ROOT}" \
-  --target-fps 4 \
-  --query-interval 4 \
-  --batch-size 32 \
-  --output-path precomputed/pg_scores_hivau_train.json \
-  --resume
-```
-
-The output JSON maps each training video to per-query detector scores:
-
-```json
-{
-  "relative/video/path.mp4": {
-    "pg_scores": [0.7311, 0.6225],
-    "n_frames": 743,
-    "sample_interval": 7,
-    "num_queries": 27
-  }
-}
-```
-
-### Stage 2: Reasoning Module Fine-Tuning
-
-```bash
-DATA_ROOT="${HIVAU_VIDEO_ROOT}" \
-PG_SCORES_PATH=precomputed/pg_scores_hivau_train.json \
-OUTPUT_DIR=ckpt/hivau-finetune/reactvau-hivau \
-bash scripts/train/finetune-hivau/finetune_reactvau.sh
-```
-
-Default settings include 4-bit QLoRA, DeepSpeed ZeRO-1, `tome729_fstw_pemf`,
-`sample_type=dynamic_fps1`, `time_msg=short_online_v2`, and score-aware memory
-training.
-
-## Evaluation
-
-### ReactVAU Streaming VAD
-
-```bash
-DATASET=ucf-crime TEST_MODE=true TEST_SAMPLES=5 \
-bash scripts/eval/run_eval_reactvau_detect.sh
-```
-
-Common options:
-
-```bash
-ANOMALY_THRESHOLD=0.3486
-SCORE_FUSION=weighted
-FUSION_ALPHA=0.40
-SF_ENHANCE_MEMORY=true
-POOL_THRESHOLD=0.6
-```
-
-Outputs are saved under:
-
-```text
-eval_results/vad/<run-name>/
-  detection.log
-  summary.json
-  video_results.json
-```
-
-### ReactVAU HIVAU Understanding
-
-```bash
-TEST_MODE=true TEST_SAMPLES=20 \
-bash scripts/eval/run_eval_reactvau_hivau.sh
-```
-
-Common options:
-
-```bash
-CONTEXT_MODE=none        # none, score, or description
-SF_ENHANCE_MEMORY=true
-ANOMALY_THRESHOLD=0.4
-PALIGEMMA_BATCH_SIZE=1
-```
-
-Outputs are saved under:
-
-```text
-eval_results/hivau/<run-name>/
-  evaluation.log
-  predictions.json
-  summary.json
-  hivau-BLEU.json
-  hivau-ROUGE.json
-  hivau-CIDEr.json
-  hivau-METEOR.json
-```
-
-## Single-Video Inference
+### Single-video inference
 
 ```bash
 source scripts/config/paths.sh
@@ -396,39 +132,103 @@ python eval_utils/hivau/run_reactvau_vau.py \
   --context-mode none \
   --anomaly-threshold 0.4 \
   --enable-memory-enhancement \
-  --target-fps 4 \
-  --query-interval 4 \
   --output-dir inference_results
 ```
 
-The output JSON contains the generated response, detector scores, anomaly
-segments, and run configuration.
+### Streaming VAD evaluation
 
-## Important Parameters
+Evaluate the Fast module alone or the full ReactVAU pipeline on UCF-Crime or XD-Violence:
 
-- `target_fps=4`: sample 4 frames per second.
-- `query_interval=4`: one detector query per second.
-- `paligemma_image_size=384`: use StreamForest SigLIP-384 vision weights.
-- `paligemma_vision_feature_layer=-2`: use second-to-last vision features.
-- `anomaly_threshold`: detector score threshold for triggering reasoning or
-  building context.
-- `pool_threshold=0.6`: Anomaly Pool insertion threshold.
-- `enable_memory_enhancement`: enable APS and Anomaly Pool.
-- `context_mode`: HIVAU PG-context mode, one of `none`, `score`, or
-  `description`.
+```bash
+DATASET=ucf-crime TEST_MODE=true TEST_SAMPLES=10 \
+  bash scripts/eval/run_eval_paligemma_detect.sh
 
-## Acknowledgements
+DATASET=ucf-crime TEST_MODE=true TEST_SAMPLES=5 \
+  bash scripts/eval/run_eval_reactvau_detect.sh
+```
 
-This project builds on PaliGemma, LLaVA-style multimodal training code, and
-StreamForest-style video-language modeling. Please cite the corresponding
-projects if you use this code.
+Set `TEST_MODE=false` for a full benchmark run. The full VAD pipeline performs Fast scoring and AAPM updates continuously, then wakes the Slow module only after a threshold crossing. The supplied script contains the paper-aligned trigger and score-fusion settings.
+
+### HIVAU-70K understanding evaluation
+
+```bash
+TEST_MODE=true TEST_SAMPLES=20 \
+  bash scripts/eval/run_eval_reactvau_hivau.sh
+```
+
+For the paper-aligned VAU protocol, keep `CONTEXT_MODE=none`, `SF_ENHANCE_MEMORY=true`, and `ANOMALY_THRESHOLD=0.4`. The Fast scores shape AAPM internally; they are not inserted into the final language question.
+
+## Training
+
+ReactVAU is trained in two stages. Before Stage 2, precompute the Stage-1 detector scores for every HIVAU training video so the same score signal drives AAPM during training and inference.
+
+### Stage 1: Construct the grid-image dataset
+
+The Fast Detection Module is trained on a combined binary dataset constructed from the UCF-Crime and XD-Violence training splits. Each sample contains four temporally ordered frames folded into 2x2 grid. The generator samples anomalous intervals as positives, normal intervals in anomalous videos as hard negatives, and UCF-Crime normal videos as easy negatives. It balances these groups with the default `1:1:1` positive:hard-negative:easy-negative ratio.
+
+To validate the dataset layout on a small subset:
+
+```bash
+source scripts/config/paths.sh
+VAD_TRAIN_ROOT="${REACTVAU_ROOT}/vad/vad_data/paligemma_train_smoke" \
+  bash scripts/gen_data/gen_train_data.sh --test-mode --test-samples 5
+```
+
+Then construct the full training set:
+
+```bash
+bash scripts/gen_data/gen_train_data.sh
+```
+
+The default output directory is `vad/vad_data/paligemma_train/` (or `VAD_TRAIN_ROOT` if overridden):
+
+```text
+vad/vad_data/paligemma_train/
+  train_images/                         # 384x384 PNG grids
+  ucf_crime_train_binary.json
+  xd_violence_train_binary.json
+  combined_train_binary.json            # input to the released Stage-1 script
+  training_stats.json
+```
+
+### Stage 1: Train the Fast Detection Module
+
+```bash
+bash scripts/train/finetune-vad/train_paligemma_vad_384.sh
+```
+
+### Precompute Fast-module scores for Stage 2
+
+```bash
+source scripts/config/paths.sh
+python scripts/precompute/precompute_pg_scores.py --resume
+```
+
+### Stage 2: Train the Slow Reasoning Module
+
+```bash
+bash scripts/train/finetune-hivau/finetune_reactvau.sh
+```
+
+The training scripts are configured for a single RTX 4090. Their path and output variables can be overridden through `scripts/config/paths.local.sh` or the command line.
 
 ## Citation
 
 ```bibtex
-@misc{reactvau,
-  title  = {ReactVAU: Streaming Video Anomaly Understanding with Score-Aware Memory},
-  author = {Anonymous},
-  year   = {2026}
+@inproceedings{chen2026reactvau,
+  title     = {ReactVAU: A Slow-Fast Decoupled Framework for Streaming Video Anomaly Understanding},
+  author    = {Chen, Chia-Hui and Yeh, Shih-Ying and Yang, Fu-En and Chen, Min-Hung and Lai, Shang-Hong},
+  booktitle = {European Conference on Computer Vision},
+  year      = {2026}
 }
 ```
+
+## Acknowledgements
+
+This repository builds on PaliGemma, LLaVA-style multimodal training infrastructure, and StreamForest for streaming video memory. We use the HIVAU-70K benchmark introduced by Holmes-VAU, together with UCF-Crime and XD-Violence for detection training and evaluation. Please cite the corresponding work when using their models, code, or data.
+
+## Licenses
+
+Copyright © 2026, NVIDIA Corporation. All rights reserved.
+
+This work is made available under the NVIDIA Source Code License-NC. Click [here](LICENSE) to view a copy of this license.

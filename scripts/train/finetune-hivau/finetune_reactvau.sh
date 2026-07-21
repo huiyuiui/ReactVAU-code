@@ -1,4 +1,13 @@
 #!/bin/bash
+
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+
 # ReactVAU HIVAU finetuning on a single RTX 4090.
 # Local non-SLURM version of scripts/sbatch/train_reactvau_hivau_4090.sh.
 
@@ -88,8 +97,9 @@ if [ ! -d "$LLM_VERSION" ]; then
     echo "ERROR: LLM checkpoint not found: $LLM_VERSION"
     exit 1
 fi
-if [ ! -f "$DATA_JSON" ]; then
-    echo "ERROR: HIVAU training JSON not found: $DATA_JSON"
+if [ -z "$DATA_JSON" ] || [ ! -f "$DATA_JSON" ]; then
+    echo "ERROR: HIVAU training JSON is not configured or not found: $DATA_JSON"
+    echo "Set HIVAU_TRAIN_JSON in scripts/config/paths.local.sh or pass DATA_JSON=/path/to/train.json."
     exit 1
 fi
 if [ ! -d "$DATA_ROOT" ]; then

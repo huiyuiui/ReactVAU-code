@@ -1,3 +1,11 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+
 """
 Combined PaliGemma + StreamForest Video Anomaly Detection Evaluation Script
 
@@ -9,13 +17,8 @@ Pipeline:
        Simultaneously, the last frame of each second is fed into StreamForest's MemoryManager.
     2. When PaliGemma detects an anomaly (score > threshold), StreamForest is triggered for 
        deep reasoning verification using its accumulated visual memory.
-    3. Four trigger modes:
-       - Mode A ("direct"): Fixed verification prompt → StreamForest re-judges Yes/No
-       - Mode B ("score"): PaliGemma anomaly score (%) embedded in prompt
-       - Mode C ("event"): PaliGemma score + top-k event types with probabilities
-         (e.g., "Fighting (75%), Arrest (18%)") → embedded in StreamForest prompt
-       - Mode D ("description"): PaliGemma generates a short description of the anomaly,
-         which is appended to the StreamForest prompt for context-aware reasoning.
+    3. PaliGemma's anomaly score is embedded in the StreamForest verification
+       prompt when the detector score exceeds the trigger threshold.
 
 Scoring:
     - If PaliGemma says Normal → final score = PaliGemma score (low)
@@ -32,7 +35,6 @@ from llava.model.builder import load_pretrained_model
 from vad.get_prompt import (
     get_grid_prompt,
     get_sf_prompt,
-    PALIGEMMA_DESCRIBE_PROMPT,
 )
 from peft import PeftModel
 from transformers import AutoProcessor, PaliGemmaForConditionalGeneration
@@ -351,162 +353,6 @@ class PaliGemmaDetector:
         for orig_idx, score in zip(valid_indices, batch_scores):
             final_scores[orig_idx] = score
         return final_scores
-
-    def describe_grid(self, grid_image: Image.Image) -> str:
-        """Generate a short anomaly description from a grid image."""
-        if grid_image is None:
-            return ""
-        full_prompt = f"<image>{PALIGEMMA_DESCRIBE_PROMPT}"
-        inputs = self.processor(
-            text=full_prompt, images=grid_image, return_tensors="pt").to(self.device)
-        if "pixel_values" in inputs:
-            inputs["pixel_values"] = inputs["pixel_values"].to(
-                self.torch_dtype)
-
-        with torch.inference_mode():
-            input_len = inputs["input_ids"].shape[1]
-            outputs = self.model.generate(
-                **inputs, max_new_tokens=60, do_sample=False)
-            generated_ids = outputs[0, input_len:]
-            return self.processor.tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-
-    def extract_event_types_topk(
-        self,
-        grid_image: Image.Image,
-        prompt: str,
-        top_k: int = 3,
-        min_prob_threshold: float = 0.05,
-    ) -> dict:
-        """
-        Extract top-k event types with probabilities from a grid image.
-        
-        The model is trained on labels like:
-            "Yes. Event: Arrest."
-            "No. Event: Normal."
-            "Yes. Event: Arrest, Fighting."
-        
-        This method:
-        1. Encodes the image with the detection prompt
-        2. Force-generates "Yes. Event: " prefix (since we already know it's anomaly)
-        3. Extracts top-k logits at the event type position
-        4. Filters out "Normal" and formats with probabilities
-        
-        Args:
-            grid_image: Input 2x2 grid PIL Image
-            prompt: Detection prompt (same as scoring)
-            top_k: Number of top event types to return
-            min_prob_threshold: Minimum probability to include (default 5%)
-        
-        Returns:
-            dict with:
-                - event_info: Formatted string like "Fighting (75%), Arrest (18%)"
-                - event_types_short: Comma-separated types like "Fighting, Arrest"
-                - event_probs: List of (event_type, probability) tuples
-        """
-        if grid_image is None:
-            return {
-                "event_info": "Unknown",
-                "event_types_short": "Unknown",
-                "event_probs": [],
-            }
-        
-        # Build the prompt with forced prefix to generate event type
-        # We use the same prompt but will manually decode to get event position
-        full_prompt = f"<image>{prompt}"
-        inputs = self.processor(
-            text=full_prompt, images=grid_image, return_tensors="pt"
-        ).to(self.device)
-        if "pixel_values" in inputs:
-            inputs["pixel_values"] = inputs["pixel_values"].to(self.torch_dtype)
-        
-        with torch.inference_mode():
-            # Generate with the prefix "Yes. Event: " forced
-            # This gives us the logits at the event type position
-            # First, encode the prefix tokens we want to force
-            prefix_text = "Yes. Event:"
-            prefix_tokens = self.processor.tokenizer.encode(
-                prefix_text, add_special_tokens=False
-            )
-            
-            # Generate the full prefix first (greedy)
-            input_len = inputs["input_ids"].shape[1]
-            
-            # Method: Generate step by step with forced decoding or
-            # simpler: generate normally and extract logits via model forward
-            
-            # Create the forced prefix input_ids
-            prefix_tensor = torch.tensor([prefix_tokens], dtype=torch.long, device=self.device)
-            extended_input_ids = torch.cat([inputs["input_ids"], prefix_tensor], dim=1)
-            
-            # Extend attention mask
-            prefix_attn = torch.ones(1, len(prefix_tokens), dtype=torch.long, device=self.device)
-            extended_attention_mask = torch.cat([inputs["attention_mask"], prefix_attn], dim=1)
-            
-            # Forward pass to get logits at the next token position (after "Event:")
-            outputs = self.model(
-                input_ids=extended_input_ids,
-                attention_mask=extended_attention_mask,
-                pixel_values=inputs["pixel_values"],
-                num_logits_to_keep=1,
-            )
-            
-            # Get logits at the last position (next token after "Event:")
-            next_token_logits = outputs.logits[0, -1]  # [vocab_size]
-            
-            # Convert to probabilities
-            probs = F.softmax(next_token_logits.float(), dim=-1)
-            
-            # Get top-k tokens and their probabilities
-            topk_probs, topk_indices = torch.topk(probs, k=min(top_k * 2, 20))  # Get extra for filtering
-            
-            # Decode tokens and filter
-            event_results = []
-            for prob, idx in zip(topk_probs.tolist(), topk_indices.tolist()):
-                token_str = self.processor.tokenizer.decode([idx]).strip()
-                
-                # Skip "Normal", empty, or non-alphabetic tokens
-                if not token_str or token_str.lower() == "normal":
-                    continue
-                if not token_str[0].isalpha():
-                    continue
-                
-                # Skip if below threshold
-                if prob < min_prob_threshold:
-                    continue
-                
-                # Clean up token (remove leading/trailing punctuation)
-                token_clean = token_str.strip(".,;:!? ")
-                if token_clean:
-                    event_results.append((token_clean, prob))
-                
-                # Stop when we have enough
-                if len(event_results) >= top_k:
-                    break
-            
-            # Format outputs
-            if not event_results:
-                return {
-                    "event_info": "Abnormal activity",
-                    "event_types_short": "Abnormal",
-                    "event_probs": [],
-                }
-            
-            # Format: "Fighting (75%), Arrest (18%)"
-            event_info_parts = [
-                f"{event} ({int(round(prob * 100))}%)"
-                for event, prob in event_results
-            ]
-            event_info = ", ".join(event_info_parts)
-            
-            # Short format: "Fighting, Arrest"
-            event_types_short = ", ".join([event for event, _ in event_results])
-            
-            return {
-                "event_info": event_info,
-                "event_types_short": event_types_short,
-                "event_probs": event_results,
-            }
-
 
 # ===================== StreamForest Reasoning Module =====================
 
@@ -1052,12 +898,8 @@ class CombinedAnomalyDetector:
             - "weighted": α*PG + (1-α)*SF fixed weighting
             - "adaptive": α scales with SF confidence (high SF → more SF weight)
 
-    Trigger modes:
-        - "direct":       Fixed verification prompt (no PG context, fastest)
-                          Note: For independent SF assessment, use trigger_mode="score" + prompt_style="neutral" instead
-        - "score":        PG score (%) embedded in prompt (no describe_grid, fast)
-        - "event":        PG score (%) + top-k event types → embedded in prompt (moderate speed)
-        - "description":  PG score (%) + PG description → embedded in prompt (requires describe_grid, slow)
+    The released VAD pipeline uses score-based triggering: PaliGemma's anomaly
+    confidence is embedded in the StreamForest verification prompt.
     """
 
     def __init__(
@@ -1065,7 +907,7 @@ class CombinedAnomalyDetector:
         paligemma_detector: PaliGemmaDetector,
         streamforest_reasoner: StreamForestReasoner,
         anomaly_threshold: float = 0.5,
-        trigger_mode: str = "direct",  # "direct", "score", "event", or "description"
+        trigger_mode: str = "score",
         paligemma_prompt: str = "",
         sf_prompt_template: str = "",  # Auto-selected prompt template
         sf_prompt_style: str = "default",  # "default", "skeptical", "neutral", "hivau", "cot"
@@ -1273,7 +1115,6 @@ class CombinedAnomalyDetector:
             if triggered:
                 # Trigger StreamForest deep reasoning
                 trigger_count += 1
-                description = ""
                 sf_trigger_start = time.time()
 
                 # === RT-Anomaly: Dense encode all 4 frames (controlled by enable_rt_anomaly) ===
@@ -1284,53 +1125,24 @@ class CombinedAnomalyDetector:
                     rt_anomaly_tokens = self.streamforest.encode_frames_batch(frame_group)  # [4, 729, C]
                     timing["rt_anomaly_encode_times"].append(time.time() - rt_encode_start)
 
-                # Build SF prompt based on trigger mode
-                if self.trigger_mode == "description":
-                    # Mode C: PG score (%) + PG description → embedded in prompt
-                    # NOTE: describe_grid is an autoregressive generation call (~5x slower)
-                    grid_image = grid_images[query_idx]
-                    description = self.paligemma.describe_grid(grid_image)
-                    score_pct = int(round(pg_score * 100))
-                    sf_prompt = self.sf_prompt_template.format(
-                        score_pct=score_pct, description=description)
-                elif self.trigger_mode == "event":
-                    # Mode D: PG score (%) + top-k event types → embedded in prompt
-                    # Extracts top-k potential event types with probabilities from PG logits
-                    grid_image = grid_images[query_idx]
-                    event_result = self.paligemma.extract_event_types_topk(
-                        grid_image, self.paligemma_prompt, top_k=3, min_prob_threshold=0.05
-                    )
-                    score_pct = int(round(pg_score * 100))
-                    description = event_result["event_info"]  # Store for logging
+                # Score-based PaliGemma context for StreamForest verification.
+                score_pct = int(round(pg_score * 100))
+                if self.sf_prompt_style in ("neutral", "hivau"):
+                    # Neutral/HIVAU prompts have no placeholders
+                    sf_prompt = self.sf_prompt_template
+                elif self.sf_prompt_style in ("skeptical", "cot") and self.enable_memory_enhancement:
+                    # Skeptical V3/V4 and CoT: {score_pct} and {anomaly_context} placeholders
+                    # anomaly_context provides text-based history from Anomaly Pool
+                    anomaly_ctx = memory_manager.get_anomaly_context()
                     sf_prompt = self.sf_prompt_template.format(
                         score_pct=score_pct,
-                        event_info=event_result["event_info"],
-                        event_types_short=event_result["event_types_short"],
-                    )
-                elif self.trigger_mode == "score":
-                    # Mode B: PG score (%) only → embedded in prompt (no describe_grid)
-                    score_pct = int(round(pg_score * 100))
-                    if self.sf_prompt_style in ("neutral", "hivau"):
-                        # Neutral/HIVAU prompts have no placeholders
-                        sf_prompt = self.sf_prompt_template
-                    elif self.sf_prompt_style in ("skeptical", "cot") and self.enable_memory_enhancement:
-                        # Skeptical V3/V4 and CoT: {score_pct} and {anomaly_context} placeholders
-                        # anomaly_context provides text-based history from Anomaly Pool
-                        anomaly_ctx = memory_manager.get_anomaly_context()
-                        sf_prompt = self.sf_prompt_template.format(
-                            score_pct=score_pct,
-                            anomaly_context=anomaly_ctx["context_str"])
-                    elif self.sf_prompt_style in ("skeptical", "cot"):
-                        # Without memory enhancement: empty anomaly_context
-                        sf_prompt = self.sf_prompt_template.format(
-                            score_pct=score_pct, anomaly_context="")
-                    else:
-                        # Default and CoT prompts have {score_pct} only
-                        sf_prompt = self.sf_prompt_template.format(
-                            score_pct=score_pct)
+                        anomaly_context=anomaly_ctx["context_str"])
+                elif self.sf_prompt_style in ("skeptical", "cot"):
+                    # Without memory enhancement: empty anomaly_context
+                    sf_prompt = self.sf_prompt_template.format(
+                        score_pct=score_pct, anomaly_context="")
                 else:
-                    # Mode A: Direct verification prompt (no PG context)
-                    sf_prompt = self.sf_prompt_template
+                    sf_prompt = self.sf_prompt_template.format(score_pct=score_pct)
 
                 # Get SF anomaly score using configured scoring method
                 # Enhanced: [PEMF][SFTW][RT-Anomaly(4×729)] + text-based anomaly context
@@ -1410,7 +1222,6 @@ class CombinedAnomalyDetector:
                     "streamforest_score": round(sf_score, 4),
                     "fused_score": round(fused_score, 4),
                     "triggered": True,
-                    "description": description,
                     # CoT reasoning text (only populated when sf_prompt_style="cot")
                     "cot_reasoning": cot_reasoning[:500] if cot_reasoning else "",
                 })
@@ -1418,7 +1229,6 @@ class CombinedAnomalyDetector:
                 if verbose:
                     logging.info(
                         f"  Q{query_idx}: PG={pg_score:.4f} -> SF={sf_score:.4f} -> fused={fused_score:.4f}"
-                        + (f" desc='{description[:60]}'" if description else "")
                     )
             else:
                 # No trigger — use PaliGemma score directly
@@ -1518,9 +1328,6 @@ def main():
                         help="Path to base PaliGemma2 model")
     parser.add_argument("--paligemma-lora-path", type=str, default=None,
                         help="Path to PaliGemma LoRA adapter")
-    parser.add_argument("--paligemma-prompt-style", type=str, default="detail",
-                        choices=["detail"],
-                        help="PaliGemma prompt style used by the current ReactVAU model")
     parser.add_argument("--paligemma-attn", type=str, default="eager",
                         choices=["eager", "sdpa", "flash_attention_2"])
 
@@ -1655,9 +1462,7 @@ def main():
             f"PaliGemma vision feature layer: {args.paligemma_vision_feature_layer}")
 
     # PaliGemma prompt
-    pg_prompt = get_grid_prompt(
-        add_special_tokens=False, style=args.paligemma_prompt_style)
-    logging.info(f"PaliGemma prompt style: {args.paligemma_prompt_style}")
+    pg_prompt = get_grid_prompt(add_special_tokens=False)
     logging.info(f"PaliGemma prompt: '{pg_prompt}'")
 
     # StreamForest prompt - auto-selected based on trigger_mode + sf_scoring_method + prompt_style
