@@ -36,7 +36,6 @@ import numpy as np
 import PIL.Image
 from PIL import Image
 from tqdm import tqdm
-from pathlib import Path
 from transformers import AutoProcessor, PaliGemmaForConditionalGeneration
 from peft import PeftModel
 from safetensors.torch import load_file as safetensors_load_file

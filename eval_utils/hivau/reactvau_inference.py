@@ -30,7 +30,6 @@ import os
 import types
 import logging
 import warnings
-import traceback
 
 import torch
 import torch.nn.functional as F

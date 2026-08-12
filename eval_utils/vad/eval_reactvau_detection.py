@@ -40,7 +40,6 @@ from peft import PeftModel
 from transformers import AutoProcessor, PaliGemmaForConditionalGeneration
 from safetensors.torch import load_file as safetensors_load_file
 import types
-from pathlib import Path
 from tqdm import tqdm
 from PIL import Image
 import PIL.Image

@@ -6,15 +6,10 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-import sys
 import os
 import json
 import argparse
-from typing import List, Union, Iterable
-from itertools import zip_longest
-from collections import defaultdict
 import numpy as np
-from tqdm import tqdm
 
 from hivau_utils import hivau_BLEU, hivau_ROUGE, hivau_CIDEr, hivau_METEOR
 
